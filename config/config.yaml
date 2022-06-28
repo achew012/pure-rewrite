@@ -1,0 +1,34 @@
+task: re3d
+data_dir: 
+output_dir: 
+max_span_length: 8
+train_batch_size: 1
+eval_batch_size: 1
+learning_rate: 1e-5
+task_learning_rate: 1e-4
+warmup_proportion: 0.1
+num_epoch: 100
+print_loss_step: 100
+eval_per_epoch: 1
+bertadam: True
+debug: False
+do_train: True
+do_eval: True
+train_shuffle: True
+dev_pred_filename: ent_pred_dev.json
+test_pred_filename: ent_pred_test.json
+use_albert: False
+model: bert-base-uncased
+bert_model_dir: 
+seed: 1234
+context_window: 64
+clearml_dataset_project_name: datasets/re3d
+clearml_dataset_name: re3d_formatted
+clearml_dataset_tags: []
+task_tags: []
+gpu: 1
+remote: False
+early_stopping: False
+checkpointing: False
+trained_model_path: 
+queue: compute
