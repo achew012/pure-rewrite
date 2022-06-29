@@ -64,24 +64,8 @@ def get_dataset(split_name, cfg) -> DataLoader:
         # only_published=True,
     )
     dataset_path = clearml_data_object.get_local_copy()
-    raw_dataset = read_json(dataset_path+f"/{split_name}.jsonl")
-
+    # raw_dataset = read_json(dataset_path+f"/{split_name}.jsonl")
     dataset = EntityDataset(dataset_path+f"/{split_name}.jsonl")
-
-    # if split_name in ["dev", "test"]:
-    #     return DataLoader(
-    #         dataset,
-    #         batch_size=cfg.batch_size,
-    #         num_workers=cfg.num_workers,
-    #         # shuffle=True,
-    #     )
-    # else:
-    #     return DataLoader(
-    #         dataset,
-    #         batch_size=cfg.batch_size,
-    #         num_workers=cfg.num_workers,
-    #         # shuffle=True,
-    #     )
     return dataset
 
 
@@ -146,7 +130,6 @@ def train(cfg) -> Any:
                     save_model(model, cfg)
 
     return model
-
 
 
 def save_model(model, args):

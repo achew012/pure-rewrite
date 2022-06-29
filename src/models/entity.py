@@ -42,23 +42,30 @@ class BertForEntity(BertPreTrainedModel):
 
     def _get_span_embeddings(self, input_ids, spans, token_type_ids=None, attention_mask=None):
         # set token_type_ids from null to zeros to match bert
+
         token_type_ids = torch.zeros(
             input_ids.size(), dtype=torch.int64, device=self.device)
 
         outputs = self.bert(
             input_ids=input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
+
         sequence_output, pooled_output = outputs.last_hidden_state, outputs.pooler_output
         sequence_output = self.hidden_dropout(sequence_output)
 
         """
-        spans: [batch_size, num_spans, 3]; 0: left_ned, 1: right_end, 2: width
+        spans: [batch_size, num_spans, 3]; 0: left_end, 1: right_end, 2: width
         spans_mask: (batch_size, num_spans, )
         """
         spans_start = spans[:, :, 0].view(spans.size(0), -1)
-        spans_start_embedding = batched_index_select(
-            sequence_output, spans_start)
-        spans_end = spans[:, :, 1].view(spans.size(0), -1)
-        spans_end_embedding = batched_index_select(sequence_output, spans_end)
+        try:
+            spans_start_embedding = batched_index_select(
+                sequence_output, spans_start)
+            spans_end = spans[:, :, 1].view(spans.size(0), -1)
+            spans_end_embedding = batched_index_select(
+                sequence_output, spans_end)
+        except Exception as e:
+            print(e)
+            ipdb.set_trace()
 
         spans_width = spans[:, :, 2].view(spans.size(0), -1)
         spans_width_embedding = self.width_embedding(spans_width)
@@ -220,7 +227,7 @@ class EntityModel():
         bert_tokens.append(self.tokenizer.cls_token)
         for token in tokens:
             sub_tokens = self.tokenizer.tokenize(token)
-            if len(bert_tokens+sub_tokens) >= (max_length-1):
+            if len(bert_tokens+sub_tokens) > (max_length-1):
                 break
             else:
                 start2idx.append(len(bert_tokens))
@@ -233,9 +240,11 @@ class EntityModel():
         try:
             # bert_spans = [[start2idx[span[0]], end2idx[span[1]], span[2]]
             #               for span in spans if span[1] < max_length]
-            bert_spans = [[span[0], span[1], span[2]]
-                          for span in spans if span[1] < 512]
-        except:
+            threshold = max_length
+            bert_spans = [[span[0]+1, span[1]+1, span[2]]
+                          for span in spans if span[1]+1 < threshold]
+        except Exception as e:
+            print(e)
             ipdb.set_trace()
 
         bert_spans_tensor = torch.tensor([bert_spans])
