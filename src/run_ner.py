@@ -71,13 +71,19 @@ def get_dataset(split_name, cfg) -> DataLoader:
 
 def train(cfg) -> Any:
     train_data = get_dataset("train", cfg)
+    dev_data = get_dataset("dev", cfg)
 
     ner_label2id, ner_id2label = get_labelmap(task_ner_labels["re3d"])
+
     train_samples, train_ner = convert_dataset_to_samples(
         train_data, max_span_length=8, ner_label2id=ner_label2id, context_window=64)
     train_batches = batchify(train_samples, batch_size=12)
-    num_ner_labels = len(task_ner_labels["re3d"]) + 1
 
+    dev_samples, dev_ner = convert_dataset_to_samples(
+        dev_data, max_span_length=8, ner_label2id=ner_label2id, context_window=64)
+    dev_batches = batchify(dev_samples, batch_size=12)
+
+    num_ner_labels = len(task_ner_labels["re3d"]) + 1
     model = EntityModel(cfg, num_ner_labels=num_ner_labels)
 
     best_result = 0.0

@@ -187,16 +187,17 @@ class EntityModel():
     def __init__(self, args, num_ner_labels):
         super().__init__()
 
-        bert_model_name = args.model
+        self.args = args
+        bert_model_name = self.args.model
         vocab_name = bert_model_name
 
-        if args.bert_model_dir is not None:
-            bert_model_name = str(args.bert_model_dir) + '/'
+        if self.args.bert_model_dir is not None:
+            bert_model_name = str(self.args.bert_model_dir) + '/'
             # vocab_name = bert_model_name + 'vocab.txt'
             vocab_name = bert_model_name
             logger.info('Loading BERT model from {}'.format(bert_model_name))
 
-        if args.use_albert:
+        if self.args.use_albert:
             self.tokenizer = AlbertTokenizer.from_pretrained(vocab_name)
             self.bert_model = AlbertForEntity.from_pretrained(
                 bert_model_name, num_ner_labels=num_ner_labels, max_span_length=args.max_span_length)
@@ -219,7 +220,7 @@ class EntityModel():
         if torch.cuda.device_count() > 1:
             self.bert_model = torch.nn.DataParallel(self.bert_model)
 
-    def _get_input_tensors(self, tokens, spans, spans_ner_label, max_length=512):
+    def _get_input_tensors(self, tokens, spans, spans_ner_label):
         start2idx = []
         end2idx = []
 
@@ -227,7 +228,7 @@ class EntityModel():
         bert_tokens.append(self.tokenizer.cls_token)
         for token in tokens:
             sub_tokens = self.tokenizer.tokenize(token)
-            if len(bert_tokens+sub_tokens) > (max_length-1):
+            if len(bert_tokens+sub_tokens) > (self.args.max_length-1):
                 break
             else:
                 start2idx.append(len(bert_tokens))
@@ -238,11 +239,15 @@ class EntityModel():
         tokens_tensor = torch.tensor([indexed_tokens])
 
         try:
+            # This will never work because span enumeration and tokenization are 2 separate independent processes, instead we offset all spans by 1 (cls token)
             # bert_spans = [[start2idx[span[0]], end2idx[span[1]], span[2]]
             #               for span in spans if span[1] < max_length]
-            threshold = max_length
+
+            # We set max index to be max length - 1 (sep token)
+            threshold = self.args.max_length-1
             bert_spans = [[span[0]+1, span[1]+1, span[2]]
                           for span in spans if span[1]+1 < threshold]
+
         except Exception as e:
             print(e)
             ipdb.set_trace()
@@ -381,10 +386,16 @@ class EntityModel():
             predicted = []
             pred_prob = []
             hidden = []
+
             for i, sample in enumerate(samples_list):
                 ner = []
                 prob = []
                 lh = []
+
+                threshold = self.args.max_length-1
+                sample['spans'] = [span for span in sample['spans']
+                                   if span[1]+1 < threshold]
+
                 for j in range(len(sample['spans'])):
                     ner.append(predicted_label[i][j])
                     # prob.append(F.softmax(ner_logits[i][j], dim=-1).cpu().numpy())
