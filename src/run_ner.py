@@ -76,12 +76,12 @@ def train(cfg) -> Any:
     ner_label2id, ner_id2label = get_labelmap(task_ner_labels["re3d"])
 
     train_samples, train_ner = convert_dataset_to_samples(
-        train_data, max_span_length=8, ner_label2id=ner_label2id, context_window=64)
-    train_batches = batchify(train_samples, batch_size=12)
+        train_data, max_span_length=8, ner_label2id=ner_label2id, context_window=cfg.context_window)
+    train_batches = batchify(train_samples, batch_size=cfg.train_batch_size)
 
     dev_samples, dev_ner = convert_dataset_to_samples(
-        dev_data, max_span_length=8, ner_label2id=ner_label2id, context_window=64)
-    dev_batches = batchify(dev_samples, batch_size=12)
+        dev_data, max_span_length=8, ner_label2id=ner_label2id, context_window=cfg.context_window)
+    dev_batches = batchify(dev_samples, batch_size=cfg.eval_batch_size)
 
     num_ner_labels = len(task_ner_labels["re3d"]) + 1
     model = EntityModel(cfg, num_ner_labels=num_ner_labels)
@@ -128,7 +128,7 @@ def train(cfg) -> Any:
                 tr_examples = 0
 
             if global_step % eval_step == 0:
-                f1 = evaluate(model, dev_batches, dev_ner)
+                f1, pred_ner = evaluate(model, dev_batches, dev_ner)
                 if f1 > best_result:
                     best_result = f1
                     logger.info('!!! Best valid (epoch=%d): %.2f' %
@@ -182,17 +182,24 @@ def evaluate(model, batches, tot_gold):
     f1 = 2 * (p * r) / (p + r) if cor > 0 else 0.0
     logger.info('P: %.5f, R: %.5f, F1: %.5f' % (p, r, f1))
     logger.info('Used time: %f' % (time.time()-c_time))
-    return f1
+    return f1, pred_ner
 
 
 def test(cfg, model) -> List:
-    return results
+    test_data = get_dataset("test", cfg)
+
+    ner_label2id, ner_id2label = get_labelmap(task_ner_labels["re3d"])
+
+    test_samples, test_ner = convert_dataset_to_samples(
+        test_data, max_span_length=8, ner_label2id=ner_label2id, context_window=cfg.context_window)
+    test_batches = batchify(test_samples, batch_size=cfg.eval_batch_size)
+    num_ner_labels = len(task_ner_labels["re3d"]) + 1
+
+    return None
 
 
 @hydra.main(config_path=os.path.join("..", "config"), config_name="config")
 def hydra_main(cfg) -> float:
-
-    # pl.seed_everything(cfg.seed, workers=True)
 
     # tags = list(cfg.task_tags) + \
     #     ["debug"] if cfg.debug else list(cfg.task_tags)
@@ -227,6 +234,10 @@ def hydra_main(cfg) -> float:
 
     if cfg.do_train:
         model = train(cfg)
+
+    if cfg.do_eval:
+        # model
+        test(cfg, model)
 
 
 if __name__ == "__main__":

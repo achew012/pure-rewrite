@@ -17,6 +17,27 @@ import json
 import logging
 import ipdb
 
+
+class FocalLoss(nn.Module):
+
+    def __init__(self, weight=None,
+                 gamma=2., reduction='none'):
+        nn.Module.__init__(self)
+        self.weight = weight
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, input_tensor, target_tensor):
+        log_prob = F.log_softmax(input_tensor, dim=-1)
+        prob = torch.exp(log_prob)
+        return F.nll_loss(
+            ((1 - prob) ** self.gamma) * log_prob,
+            target_tensor,
+            weight=self.weight,
+            reduction=self.reduction
+        )
+
+
 logger = logging.getLogger('root')
 
 
@@ -28,6 +49,7 @@ class BertForEntity(BertPreTrainedModel):
         self.hidden_dropout = nn.Dropout(config.hidden_dropout_prob)
         self.width_embedding = nn.Embedding(
             max_span_length+1, width_embedding_dim)
+        self.num_ner_labels = num_ner_labels
 
         self.ner_classifier = nn.Sequential(
             FeedForward(input_dim=config.hidden_size*2+width_embedding_dim,
@@ -91,13 +113,22 @@ class BertForEntity(BertPreTrainedModel):
         logits = ffnn_hidden[-1]
 
         if spans_ner_label is not None:
-            loss_fct = CrossEntropyLoss(reduction='sum')
+            batch_average_non_zero = torch.min(
+                torch.sum(torch.gt(spans_ner_label, 0), dim=1))/spans_ner_label.size()[0]
+            weighted_ratio = batch_average_non_zero/spans_ner_label.size()[1]
+            loss_fct = FocalLoss(weight=torch.tensor([weighted_ratio if idx == 0 else 1 for idx in range(
+                self.num_ner_labels)], device=self.device), gamma=2., reduction='sum')
+            # loss_fct = CrossEntropyLoss(reduction='sum')
             if attention_mask is not None:
                 active_loss = spans_mask.view(-1) == 1
                 active_logits = logits.view(-1, logits.shape[-1])
+                # active_labels = torch.where(
+                #     active_loss, spans_ner_label.view(-1), torch.tensor(
+                #         loss_fct.ignore_index).type_as(spans_ner_label)
+                # )
                 active_labels = torch.where(
                     active_loss, spans_ner_label.view(-1), torch.tensor(
-                        loss_fct.ignore_index).type_as(spans_ner_label)
+                        -100).type_as(spans_ner_label)
                 )
                 loss = loss_fct(active_logits, active_labels)
             else:
@@ -188,6 +219,7 @@ class EntityModel():
         super().__init__()
 
         self.args = args
+        self.num_ner_labels = num_ner_labels
         bert_model_name = self.args.model
         vocab_name = bert_model_name
 
@@ -228,7 +260,7 @@ class EntityModel():
         bert_tokens.append(self.tokenizer.cls_token)
         for token in tokens:
             sub_tokens = self.tokenizer.tokenize(token)
-            if len(bert_tokens+sub_tokens) > (self.args.max_length-1):
+            if len(bert_tokens+sub_tokens) >= (self.args.max_length-1):
                 break
             else:
                 start2idx.append(len(bert_tokens))
