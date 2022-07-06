@@ -17,7 +17,6 @@ import logging
 import time
 from clearml import Task, StorageManager, Dataset as ClearML_Dataset
 
-
 from common.data_structures import Dataset as EntityDataset
 from common.const import task_ner_labels, get_labelmap
 from common.utils import *
@@ -138,6 +137,52 @@ def train(cfg) -> Any:
     return model
 
 
+def output_ner_predictions(model, batches, dataset, output_file):
+    """
+    Save the prediction as a json file
+    """
+    ner_result = {}
+    span_hidden_table = {}
+    tot_pred_ett = 0
+    for i in range(len(batches)):
+        output_dict = model.run_batch(batches[i], training=False)
+        pred_ner = output_dict['pred_ner']
+        for sample, preds in zip(batches[i], pred_ner):
+            off = sample['sent_start_in_doc'] - sample['sent_start']
+            k = sample['doc_key'] + '-' + str(sample['sentence_ix'])
+            ner_result[k] = []
+            for span, pred in zip(sample['spans'], preds):
+                span_id = '%s::%d::(%d,%d)' % (
+                    sample['doc_key'], sample['sentence_ix'], span[0]+off, span[1]+off)
+                if pred == 0:
+                    continue
+                ner_result[k].append(
+                    [span[0]+off, span[1]+off, ner_id2label[pred]])
+            tot_pred_ett += len(ner_result[k])
+
+    logger.info('Total pred entities: %d' % tot_pred_ett)
+
+    js = dataset.js
+    for i, doc in enumerate(js):
+        doc["predicted_ner"] = []
+        doc["predicted_relations"] = []
+        for j in range(len(doc["sentences"])):
+            k = doc['doc_key'] + '-' + str(j)
+            if k in ner_result:
+                doc["predicted_ner"].append(ner_result[k])
+            else:
+                logger.info('%s not in NER results!' % k)
+                doc["predicted_ner"].append([])
+
+            doc["predicted_relations"].append([])
+
+        js[i] = doc
+
+    logger.info('Output predictions to %s..' % (output_file))
+    with open(output_file, 'w') as f:
+        f.write('\n'.join(json.dumps(doc, cls=NpEncoder) for doc in js))
+
+
 def save_model(model, args):
     """
     Save the model to the output directory
@@ -185,59 +230,61 @@ def evaluate(model, batches, tot_gold):
     return f1, pred_ner
 
 
-def test(cfg, model) -> List:
+def test(cfg, model, task=None) -> None:
     test_data = get_dataset("test", cfg)
-
     ner_label2id, ner_id2label = get_labelmap(task_ner_labels["re3d"])
 
     test_samples, test_ner = convert_dataset_to_samples(
-        test_data, max_span_length=8, ner_label2id=ner_label2id, context_window=cfg.context_window)
+        test_data, max_span_length=cfg.max_span_length, ner_label2id=ner_label2id, context_window=cfg.context_window)
     test_batches = batchify(test_samples, batch_size=cfg.eval_batch_size)
     num_ner_labels = len(task_ner_labels["re3d"]) + 1
 
-    return None
+    evaluate(model, test_batches, test_ner)
+    prediction_file = os.path.join(cfg.output_dir, cfg.test_pred_filename)
+    output_ner_predictions(model, test_batches, test_data,
+                           output_file=prediction_file)
+    if task:
+        task.upload_artifact("preds", prediction_file)
 
 
 @hydra.main(config_path=os.path.join("..", "config"), config_name="config")
 def hydra_main(cfg) -> float:
 
-    # tags = list(cfg.task_tags) + \
-    #     ["debug"] if cfg.debug else list(cfg.task_tags)
-    # tags = (
-    #     tags + ["squad-pretrained"]
-    #     if cfg.model_name == "mrm8488/longformer-base-4096-finetuned-squadv2"
-    #     else tags + ["longformer-base"]
-    # )
+    tags = list(cfg.task_tags) + \
+        ["debug"] if cfg.debug else list(cfg.task_tags)
 
-    # if cfg.train:
-    #     task = Task.init(
-    #         project_name="ER-extraction",
-    #         task_name="NER-train",
-    #         output_uri="s3://experiment-logging/storage/",
-    #         tags=tags,
-    #     )
-    # else:
-    #     task = Task.init(
-    #         project_name="ER-extraction",
-    #         task_name="NER-predict",
-    #         output_uri="s3://experiment-logging/storage/",
-    #         tags=tags,
-    #     )
+    if cfg.do_train:
+        task = Task.init(
+            project_name="ER-extraction",
+            task_name="pure-train",
+            output_uri="s3://experiment-logging/storage/",
+            tags=tags,
+        )
+    else:
+        task = Task.init(
+            project_name="ER-extraction",
+            task_name="pure-predict",
+            output_uri="s3://experiment-logging/storage/",
+            tags=tags,
+        )
 
-    # cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-    # task.connect(cfg_dict)
-    # cfg = get_clearml_params(task)
-    # print("Detected config file, initiating task... {}".format(cfg))
-    # if cfg.remote:
-    #     task.set_base_docker("nvidia/cuda:11.4.0-runtime-ubuntu20.04")
-    #     task.execute_remotely(queue_name=cfg.queue, exit_process=True)
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+    task.connect(cfg_dict)
+    cfg = get_clearml_params(task)
+    print("Detected config file, initiating task... {}".format(cfg))
+
+    if cfg.remote:
+        task.set_base_docker("nvidia/cuda:11.4.0-runtime-ubuntu20.04")
+        task.execute_remotely(queue_name=cfg.queue, exit_process=True)
+
+    if not os.path.exists(cfg.output_dir):
+        os.makedirs(cfg.output_dir)
 
     if cfg.do_train:
         model = train(cfg)
 
     if cfg.do_eval:
-        # model
-        test(cfg, model)
+        test(cfg, model, task)
 
 
 if __name__ == "__main__":

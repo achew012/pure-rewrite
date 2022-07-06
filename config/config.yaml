@@ -20,7 +20,7 @@ dev_pred_filename: ent_pred_dev.json
 test_pred_filename: ent_pred_test.json
 use_albert: False
 model: bert-base-uncased
-bert_model_dir: 
+bert_model_dir: None
 seed: 1234
 context_window: 64
 clearml_dataset_project_name: datasets/re3d
