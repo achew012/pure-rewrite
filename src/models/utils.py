@@ -118,6 +118,8 @@ def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, cont
             for ner in sent.ner:
                 sent_ner[ner.span.span_sent] = ner.label
 
+            import ipdb;ipdb.set_trace()
+
             span2id = {}
             sample['spans'] = []
             sample['spans_label'] = []
