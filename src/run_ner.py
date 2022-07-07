@@ -22,6 +22,7 @@ from common.const import task_ner_labels, get_labelmap
 from common.utils import *
 from models.utils import convert_dataset_to_samples, batchify, NpEncoder
 from models.entity import EntityModel
+import torch
 
 Task.force_requirements_env_freeze(
     force=True, requirements_file="requirements.txt")
@@ -67,6 +68,13 @@ def get_dataset(split_name, cfg) -> DataLoader:
     dataset = EntityDataset(dataset_path+f"/{split_name}.jsonl")
     return dataset
 
+def calculate_loss_weights(spans_ner_label, num_ner_labels):
+    weighted_ratio = torch.nn.init.constant_(torch.empty(num_ner_labels), 0.5)
+    unique_class_distribution = torch.unique(spans_ner_label, return_counts=True)
+    for idx, count in zip(unique_class_distribution[0],unique_class_distribution[1]):
+        ratio = (count/spans_ner_label.size()[-1])*1
+        weighted_ratio[idx] = 1-ratio
+    return weighted_ratio
 
 def train(cfg) -> Any:
     train_data = get_dataset("train", cfg)
@@ -75,15 +83,18 @@ def train(cfg) -> Any:
     ner_label2id, ner_id2label = get_labelmap(task_ner_labels["re3d"])
 
     train_samples, train_ner = convert_dataset_to_samples(
-        train_data, max_span_length=8, ner_label2id=ner_label2id, context_window=cfg.context_window)
+        train_data, max_span_length=cfg.max_span_length, ner_label2id=ner_label2id, context_window=cfg.context_window, negative_sample_ratio=cfg.negative_sample_ratio)
     train_batches = batchify(train_samples, batch_size=cfg.train_batch_size)
 
+    train_labels = torch.tensor([labels for sample in train_samples for labels in sample['spans_label']])
+
     dev_samples, dev_ner = convert_dataset_to_samples(
-        dev_data, max_span_length=8, ner_label2id=ner_label2id, context_window=cfg.context_window)
+        dev_data, max_span_length=cfg.max_span_length, ner_label2id=ner_label2id, context_window=cfg.context_window)
     dev_batches = batchify(dev_samples, batch_size=cfg.eval_batch_size)
 
     num_ner_labels = len(task_ner_labels["re3d"]) + 1
-    model = EntityModel(cfg, num_ner_labels=num_ner_labels)
+    loss_weights = calculate_loss_weights(train_labels, num_ner_labels)
+    model = EntityModel(cfg, num_ner_labels=num_ner_labels, loss_weights=loss_weights)
 
     best_result = 0.0
 
@@ -96,6 +107,7 @@ def train(cfg) -> Any:
     optimizer = AdamW(optimizer_grouped_parameters,
                       lr=cfg.learning_rate, correct_bias=not(cfg.bertadam))
     t_total = len(train_batches) * cfg.num_epoch
+
     scheduler = get_linear_schedule_with_warmup(
         optimizer, int(t_total*cfg.warmup_proportion), t_total)
 
@@ -137,7 +149,7 @@ def train(cfg) -> Any:
     return model
 
 
-def output_ner_predictions(model, batches, dataset, output_file):
+def output_ner_predictions(model, ner_id2label, batches, dataset, output_file):
     """
     Save the prediction as a json file
     """
@@ -241,7 +253,7 @@ def test(cfg, model, task=None) -> None:
 
     evaluate(model, test_batches, test_ner)
     prediction_file = os.path.join(cfg.output_dir, cfg.test_pred_filename)
-    output_ner_predictions(model, test_batches, test_data,
+    output_ner_predictions(model, ner_id2label, test_batches, test_data,
                            output_file=prediction_file)
     if task:
         task.upload_artifact("preds", prediction_file)

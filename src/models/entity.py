@@ -42,7 +42,7 @@ logger = logging.getLogger('root')
 
 
 class BertForEntity(BertPreTrainedModel):
-    def __init__(self, config, num_ner_labels, head_hidden_dim=150, width_embedding_dim=150, max_span_length=8):
+    def __init__(self, config, num_ner_labels, head_hidden_dim=150, width_embedding_dim=150, max_span_length=8, loss_weights=None):
         super().__init__(config)
 
         self.bert = BertModel(config)
@@ -50,6 +50,9 @@ class BertForEntity(BertPreTrainedModel):
         self.width_embedding = nn.Embedding(
             max_span_length+1, width_embedding_dim)
         self.num_ner_labels = num_ner_labels
+
+        if loss_weights!=None:
+            self.loss_weights = loss_weights
 
         self.ner_classifier = nn.Sequential(
             FeedForward(input_dim=config.hidden_size*2+width_embedding_dim,
@@ -113,12 +116,13 @@ class BertForEntity(BertPreTrainedModel):
         logits = ffnn_hidden[-1]
 
         if spans_ner_label is not None:
-            batch_average_non_zero = torch.min(
-                torch.sum(torch.gt(spans_ner_label, 0), dim=1))/spans_ner_label.size()[0]
-            weighted_ratio = batch_average_non_zero/spans_ner_label.size()[1]
-            loss_fct = FocalLoss(weight=torch.tensor([weighted_ratio if idx == 0 else 1 for idx in range(
-                self.num_ner_labels)], device=self.device), gamma=2., reduction='sum')
-            # loss_fct = CrossEntropyLoss(reduction='sum')
+
+            loss_fct = FocalLoss(gamma=2., reduction='sum')
+            #loss_fct = CrossEntropyLoss(reduction='sum')
+
+            if self.loss_weights!=None:
+                loss_fct.weight = self.loss_weights.to(self.device)          
+
             if attention_mask is not None:
                 active_loss = spans_mask.view(-1) == 1
                 active_logits = logits.view(-1, logits.shape[-1])
@@ -215,11 +219,12 @@ class AlbertForEntity(AlbertPreTrainedModel):
 
 class EntityModel():
 
-    def __init__(self, args, num_ner_labels):
+    def __init__(self, args, num_ner_labels, loss_weights=None):
         super().__init__()
 
         self.args = args
         self.num_ner_labels = num_ner_labels
+        self.loss_weights = loss_weights
         bert_model_name = self.args.model
         vocab_name = bert_model_name
 
@@ -236,7 +241,7 @@ class EntityModel():
         else:
             self.tokenizer = BertTokenizer.from_pretrained(vocab_name)
             self.bert_model = BertForEntity.from_pretrained(
-                bert_model_name, num_ner_labels=num_ner_labels, max_span_length=args.max_span_length)
+                bert_model_name, num_ner_labels=num_ner_labels, max_span_length=args.max_span_length, loss_weights=self.loss_weights)
 
         self._model_device = 'cpu'
         self.move_model_to_cuda()

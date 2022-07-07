@@ -46,9 +46,9 @@ def overlap(s1, s2):
         return True
     return False
 
-def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, context_window=0, split=0):
+def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, context_window=0, split=0, negative_sample_ratio=0.5):
     """
-    Extract sentences and gold entities from a dataset
+-    Extract sentences and gold entities from a dataset
     """
     # split: split the data into train and dev (for ACE04)
     # split == 0: don't split
@@ -123,12 +123,18 @@ def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, cont
             sample['spans_label'] = []
             for i in range(len(sent.text)):
                 for j in range(i, min(len(sent.text), i+max_span_length)):
-                    sample['spans'].append((i+sent_start, j+sent_start, j-i+1))
+                    # sample['spans'].append((i+sent_start, j+sent_start, j-i+1))
                     span2id[(i, j)] = len(sample['spans'])-1
                     if (i, j) not in sent_ner:
-                        sample['spans_label'].append(0)
+                        # Sample only a ratio of negative spans
+                        if random.random() < negative_sample_ratio:
+                            sample['spans'].append((i+sent_start, j+sent_start, j-i+1))
+                            sample['spans_label'].append(0)
                     else:
+                        # Add all positive spans
+                        sample['spans'].append((i+sent_start, j+sent_start, j-i+1))
                         sample['spans_label'].append(ner_label2id[sent_ner[(i, j)]])
+
             samples.append(sample)
     avg_length = sum([len(sample['tokens']) for sample in samples]) / len(samples)
     max_length = max([len(sample['tokens']) for sample in samples])
