@@ -51,7 +51,7 @@ class BertForEntity(BertPreTrainedModel):
             max_span_length+1, width_embedding_dim)
         self.num_ner_labels = num_ner_labels
 
-        if loss_weights!=None:
+        if loss_weights != None:
             self.loss_weights = loss_weights
 
         self.ner_classifier = nn.Sequential(
@@ -120,8 +120,8 @@ class BertForEntity(BertPreTrainedModel):
             loss_fct = FocalLoss(gamma=2., reduction='sum')
             #loss_fct = CrossEntropyLoss(reduction='sum')
 
-            if self.loss_weights!=None:
-                loss_fct.weight = self.loss_weights.to(self.device)          
+            if self.loss_weights != None:
+                loss_fct.weight = self.loss_weights.to(self.device)
 
             if attention_mask is not None:
                 active_loss = spans_mask.view(-1) == 1

@@ -64,17 +64,19 @@ def get_dataset(split_name, cfg) -> DataLoader:
         # only_published=True,
     )
     dataset_path = clearml_data_object.get_local_copy()
-    # raw_dataset = read_json(dataset_path+f"/{split_name}.jsonl")
     dataset = EntityDataset(dataset_path+f"/{split_name}.jsonl")
     return dataset
 
+
 def calculate_loss_weights(spans_ner_label, num_ner_labels):
     weighted_ratio = torch.nn.init.constant_(torch.empty(num_ner_labels), 0.5)
-    unique_class_distribution = torch.unique(spans_ner_label, return_counts=True)
-    for idx, count in zip(unique_class_distribution[0],unique_class_distribution[1]):
+    unique_class_distribution = torch.unique(
+        spans_ner_label, return_counts=True)
+    for idx, count in zip(unique_class_distribution[0], unique_class_distribution[1]):
         ratio = (count/spans_ner_label.size()[-1])*1
         weighted_ratio[idx] = 1-ratio
     return weighted_ratio
+
 
 def train(cfg) -> Any:
     train_data = get_dataset("train", cfg)
@@ -86,7 +88,8 @@ def train(cfg) -> Any:
         train_data, max_span_length=cfg.max_span_length, ner_label2id=ner_label2id, context_window=cfg.context_window, negative_sample_ratio=cfg.negative_sample_ratio)
     train_batches = batchify(train_samples, batch_size=cfg.train_batch_size)
 
-    train_labels = torch.tensor([labels for sample in train_samples for labels in sample['spans_label']])
+    train_labels = torch.tensor(
+        [labels for sample in train_samples for labels in sample['spans_label']])
 
     dev_samples, dev_ner = convert_dataset_to_samples(
         dev_data, max_span_length=cfg.max_span_length, ner_label2id=ner_label2id, context_window=cfg.context_window)
@@ -94,7 +97,8 @@ def train(cfg) -> Any:
 
     num_ner_labels = len(task_ner_labels["re3d"]) + 1
     loss_weights = calculate_loss_weights(train_labels, num_ner_labels)
-    model = EntityModel(cfg, num_ner_labels=num_ner_labels, loss_weights=loss_weights)
+    model = EntityModel(cfg, num_ner_labels=num_ner_labels,
+                        loss_weights=loss_weights)
 
     best_result = 0.0
 
@@ -163,6 +167,7 @@ def output_ner_predictions(model, ner_id2label, batches, dataset, output_file):
             off = sample['sent_start_in_doc'] - sample['sent_start']
             k = sample['doc_key'] + '-' + str(sample['sentence_ix'])
             ner_result[k] = []
+
             for span, pred in zip(sample['spans'], preds):
                 span_id = '%s::%d::(%d,%d)' % (
                     sample['doc_key'], sample['sentence_ix'], span[0]+off, span[1]+off)
@@ -252,7 +257,9 @@ def test(cfg, model, task=None) -> None:
     num_ner_labels = len(task_ner_labels["re3d"]) + 1
 
     evaluate(model, test_batches, test_ner)
-    prediction_file = os.path.join(cfg.output_dir, cfg.test_pred_filename)
+    prediction_file = os.path.join(cfg.output_dir, cfg.
+                                   test_pred_filename)
+
     output_ner_predictions(model, ner_id2label, test_batches, test_data,
                            output_file=prediction_file)
     if task:
@@ -296,7 +303,7 @@ def hydra_main(cfg) -> float:
         model = train(cfg)
 
     if cfg.do_eval:
-        test(cfg, model, task)
+        test(cfg, model)
 
 
 if __name__ == "__main__":

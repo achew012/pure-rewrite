@@ -20,17 +20,19 @@ def batchify(samples, batch_size):
     num_samples = len(samples)
 
     list_samples_batches = []
-    
+
     # if a sentence is too long, make itself a batch to avoid GPU OOM
     to_single_batch = []
     for i in range(0, len(samples)):
         if len(samples[i]['tokens']) > 350:
             to_single_batch.append(i)
-    
+
     for i in to_single_batch:
-        logger.info('Single batch sample: %s-%d', samples[i]['doc_key'], samples[i]['sentence_ix'])
+        logger.info('Single batch sample: %s-%d',
+                    samples[i]['doc_key'], samples[i]['sentence_ix'])
         list_samples_batches.append([samples[i]])
-    samples = [sample for i, sample in enumerate(samples) if i not in to_single_batch]
+    samples = [sample for i, sample in enumerate(
+        samples) if i not in to_single_batch]
 
     for i in range(0, len(samples), batch_size):
         list_samples_batches.append(samples[i:i+batch_size])
@@ -39,12 +41,14 @@ def batchify(samples, batch_size):
 
     return list_samples_batches
 
+
 def overlap(s1, s2):
     if s2.start_sent >= s1.start_sent and s2.start_sent <= s1.end_sent:
         return True
     if s2.end_sent >= s1.start_sent and s2.end_sent <= s1.end_sent:
         return True
     return False
+
 
 def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, context_window=0, split=0, negative_sample_ratio=0.5):
     """
@@ -59,7 +63,7 @@ def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, cont
     max_len = 0
     max_ner = 0
     num_overlap = 0
-    
+
     if split == 0:
         data_range = (0, len(dataset))
     elif split == 1:
@@ -77,7 +81,8 @@ def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, cont
                 'sentence_ix': sent.sentence_ix,
             }
             if context_window != 0 and len(sent.text) > context_window:
-                logger.info('Long sentence: {} {}'.format(sample, len(sent.text)))
+                logger.info('Long sentence: {} {}'.format(
+                    sample, len(sent.text)))
                 # print('Exclude:', sample)
                 # continue
             sample['tokens'] = sent.text
@@ -91,7 +96,7 @@ def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, cont
             if context_window > 0:
                 add_left = (context_window-len(sent.text)) // 2
                 add_right = (context_window-len(sent.text)) - add_left
-                
+
                 # add left context
                 j = i - 1
                 while j >= 0 and add_left > 0:
@@ -113,12 +118,10 @@ def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, cont
             sample['sent_start'] = sent_start
             sample['sent_end'] = sent_end
             sample['sent_start_in_doc'] = sent.sentence_start
-            
+
             sent_ner = {}
             for ner in sent.ner:
                 sent_ner[ner.span.span_sent] = ner.label
-
-            import ipdb;ipdb.set_trace()
 
             span2id = {}
             sample['spans'] = []
@@ -130,21 +133,27 @@ def convert_dataset_to_samples(dataset, max_span_length, ner_label2id=None, cont
                     if (i, j) not in sent_ner:
                         # Sample only a ratio of negative spans
                         if random.random() < negative_sample_ratio:
-                            sample['spans'].append((i+sent_start, j+sent_start, j-i+1))
+                            sample['spans'].append(
+                                (i+sent_start, j+sent_start, j-i+1))
                             sample['spans_label'].append(0)
                     else:
                         # Add all positive spans
-                        sample['spans'].append((i+sent_start, j+sent_start, j-i+1))
-                        sample['spans_label'].append(ner_label2id[sent_ner[(i, j)]])
+                        sample['spans'].append(
+                            (i+sent_start, j+sent_start, j-i+1))
+                        sample['spans_label'].append(
+                            ner_label2id[sent_ner[(i, j)]])
 
             samples.append(sample)
-    avg_length = sum([len(sample['tokens']) for sample in samples]) / len(samples)
+    avg_length = sum([len(sample['tokens'])
+                     for sample in samples]) / len(samples)
     max_length = max([len(sample['tokens']) for sample in samples])
 
-    logger.info('# Overlap: %d'%num_overlap)
-    logger.info('Extracted %d samples from %d documents, with %d NER labels, %.3f avg input length, %d max length'%(len(samples), data_range[1]-data_range[0], num_ner, avg_length, max_length))
-    logger.info('Max Length: %d, max NER: %d'%(max_len, max_ner))
+    logger.info('# Overlap: %d' % num_overlap)
+    logger.info('Extracted %d samples from %d documents, with %d NER labels, %.3f avg input length, %d max length' % (
+        len(samples), data_range[1]-data_range[0], num_ner, avg_length, max_length))
+    logger.info('Max Length: %d, max NER: %d' % (max_len, max_ner))
     return samples, num_ner
+
 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -157,8 +166,9 @@ class NpEncoder(json.JSONEncoder):
         else:
             return super(NpEncoder, self).default(obj)
 
+
 def get_train_fold(data, fold):
-    print('Getting train fold %d...'%fold)
+    print('Getting train fold %d...' % fold)
     l = int(len(data) * 0.1 * fold)
     r = int(len(data) * 0.1 * (fold+1))
     new_js = []
@@ -167,13 +177,14 @@ def get_train_fold(data, fold):
         if i < l or i >= r:
             new_js.append(data.js[i])
             new_docs.append(data.documents[i])
-    print('# documents: %d --> %d'%(len(data), len(new_docs)))
+    print('# documents: %d --> %d' % (len(data), len(new_docs)))
     data.js = new_js
     data.documents = new_docs
     return data
 
+
 def get_test_fold(data, fold):
-    print('Getting test fold %d...'%fold)
+    print('Getting test fold %d...' % fold)
     l = int(len(data) * 0.1 * fold)
     r = int(len(data) * 0.1 * (fold+1))
     new_js = []
@@ -182,12 +193,13 @@ def get_test_fold(data, fold):
         if i >= l and i < r:
             new_js.append(data.js[i])
             new_docs.append(data.documents[i])
-    print('# documents: %d --> %d'%(len(data), len(new_docs)))
+    print('# documents: %d --> %d' % (len(data), len(new_docs)))
     data.js = new_js
     data.documents = new_docs
     return data
 
 ### RELATIONS UTILS ###
+
 
 def decode_sample_id(sample_id):
     doc_sent = sample_id.split('::')[0]
@@ -198,12 +210,13 @@ def decode_sample_id(sample_id):
 
     return doc_sent, sub, obj
 
+
 def generate_relation_data(entity_data, use_gold=False, context_window=0):
     """
     Prepare data for the relation model
     If training: set use_gold = True
     """
-    logger.info('Generate relation data from %s'%(entity_data))
+    logger.info('Generate relation data from %s' % (entity_data))
     data = Dataset(entity_data)
 
     nner, nrel = 0, 0
@@ -219,15 +232,15 @@ def generate_relation_data(entity_data, use_gold=False, context_window=0):
                 sent_ner = sent.ner
             else:
                 sent_ner = sent.predicted_ner
-            
+
             gold_ner = {}
             for ner in sent.ner:
                 gold_ner[ner.span] = ner.label
-            
+
             gold_rel = {}
             for rel in sent.relations:
                 gold_rel[rel.pair] = rel.label
-            
+
             sent_start = 0
             sent_end = len(sent.text)
             tokens = sent.text
@@ -251,7 +264,7 @@ def generate_relation_data(entity_data, use_gold=False, context_window=0):
                     tokens = tokens + context_to_add
                     add_right -= len(context_to_add)
                     j += 1
-            
+
             for x in range(len(sent_ner)):
                 for y in range(len(sent_ner)):
                     if x == y:
@@ -261,7 +274,8 @@ def generate_relation_data(entity_data, use_gold=False, context_window=0):
                     label = gold_rel.get((sub.span, obj.span), 'no_relation')
                     sample = {}
                     sample['docid'] = doc._doc_key
-                    sample['id'] = '%s@%d::(%d,%d)-(%d,%d)'%(doc._doc_key, sent.sentence_ix, sub.span.start_doc, sub.span.end_doc, obj.span.start_doc, obj.span.end_doc)
+                    sample['id'] = '%s@%d::(%d,%d)-(%d,%d)' % (doc._doc_key, sent.sentence_ix,
+                                                               sub.span.start_doc, sub.span.end_doc, obj.span.start_doc, obj.span.end_doc)
                     sample['relation'] = label
                     sample['subj_start'] = sub.span.start_sent + sent_start
                     sample['subj_end'] = sub.span.end_sent + sent_start
@@ -277,9 +291,8 @@ def generate_relation_data(entity_data, use_gold=False, context_window=0):
 
             max_sentsample = max(max_sentsample, len(sent_samples))
             samples += sent_samples
-    
+
     tot = len(samples)
-    logger.info('#samples: %d, max #sent.samples: %d'%(tot, max_sentsample))
+    logger.info('#samples: %d, max #sent.samples: %d' % (tot, max_sentsample))
 
     return data, samples, nrel
-

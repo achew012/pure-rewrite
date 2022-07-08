@@ -46,28 +46,10 @@ class Dataset:
         self.js = js
         self.documents = [Document(js) for js in self.js]
 
-    # def pad_function(self, tokens_list: list, pad_token: str, max_length: int = 512) -> list:
-    #     padded_tokens_list = []
-    #     for tokens in tokens_list:
-    #         sent_length = len(tokens)
-    #         num_spare_tokens = max_length-sent_length
-    #         if num_spare_tokens > 0:
-    #             # sentence is less than max length - pad the remaining length
-    #             padded_tokens = tokens+num_spare_tokens*[pad_token]
-    #             assert len(padded_tokens) <= max_length
-    #             f"new tokens do not conform to max length, got {len(padded_tokens)} when max length is {max_length}"
-    #             padded_tokens_list.append(padded_tokens)
-    #         else:
-    #             padded_tokens_list.append(tokens[:max_length])
-    #     return padded_tokens_list
-
     def _read(self, json_file, pred_file=None):
         gold_docs = [json.loads(line) for line in open(json_file)]
 
-        # workaround to PURE format
-        # gold_docs = [{"doc_key": doc["doc_key"], "sentences": [self.pad_function(doc["sentences"], pad_token="<PAD>")], "ner": [
-        #     doc["ner"]], "relations":[doc["relations"]]} for doc in gold_docs]
-
+        # ONLY FOR RE3D DATASET
         gold_docs = [{"doc_key": doc["doc_key"], "sentences": [doc["sentences"]], "ner": [
             doc["ner"]], "relations":[doc["relations"]]} for doc in gold_docs]
 
