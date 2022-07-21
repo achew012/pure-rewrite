@@ -69,11 +69,11 @@ def get_dataset(split_name, cfg) -> DataLoader:
 
 
 def calculate_loss_weights(spans_ner_label, num_ner_labels):
-    weighted_ratio = torch.nn.init.constant_(torch.empty(num_ner_labels), 0.5)
+    weighted_ratio = torch.nn.init.constant_(torch.empty(num_ner_labels), 0.9)
     unique_class_distribution = torch.unique(
         spans_ner_label, return_counts=True)
     for idx, count in zip(unique_class_distribution[0], unique_class_distribution[1]):
-        ratio = (count/spans_ner_label.size()[-1])*1
+        ratio = (count/spans_ner_label.size()[-1])
         weighted_ratio[idx] = 1-ratio
     return weighted_ratio
 
@@ -87,7 +87,6 @@ def train(cfg) -> Any:
     train_samples, train_ner = convert_dataset_to_samples(
         train_data, max_span_length=cfg.max_span_length, ner_label2id=ner_label2id, context_window=cfg.context_window, negative_sample_ratio=cfg.negative_sample_ratio)
     train_batches = batchify(train_samples, batch_size=cfg.train_batch_size)
-
     train_labels = torch.tensor(
         [labels for sample in train_samples for labels in sample['spans_label']])
 
@@ -272,29 +271,29 @@ def hydra_main(cfg) -> float:
     tags = list(cfg.task_tags) + \
         ["debug"] if cfg.debug else list(cfg.task_tags)
 
-    if cfg.do_train:
-        task = Task.init(
-            project_name="ER-extraction",
-            task_name="pure-train",
-            output_uri="s3://experiment-logging/storage/",
-            tags=tags,
-        )
-    else:
-        task = Task.init(
-            project_name="ER-extraction",
-            task_name="pure-predict",
-            output_uri="s3://experiment-logging/storage/",
-            tags=tags,
-        )
+    # if cfg.do_train:
+    #     task = Task.init(
+    #         project_name="ER-extraction",
+    #         task_name="pure-train",
+    #         output_uri="s3://experiment-logging/storage/",
+    #         tags=tags,
+    #     )
+    # else:
+    #     task = Task.init(
+    #         project_name="ER-extraction",
+    #         task_name="pure-predict",
+    #         output_uri="s3://experiment-logging/storage/",
+    #         tags=tags,
+    #     )
 
-    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-    task.connect(cfg_dict)
-    cfg = get_clearml_params(task)
-    print("Detected config file, initiating task... {}".format(cfg))
+    # cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+    # task.connect(cfg_dict)
+    # cfg = get_clearml_params(task)
+    # print("Detected config file, initiating task... {}".format(cfg))
 
-    if cfg.remote:
-        task.set_base_docker("nvidia/cuda:11.4.0-runtime-ubuntu20.04")
-        task.execute_remotely(queue_name=cfg.queue, exit_process=True)
+    # if cfg.remote:
+    #     task.set_base_docker("nvidia/cuda:11.4.0-runtime-ubuntu20.04")
+    #     task.execute_remotely(queue_name=cfg.queue, exit_process=True)
 
     if not os.path.exists(cfg.output_dir):
         os.makedirs(cfg.output_dir)

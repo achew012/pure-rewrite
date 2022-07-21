@@ -3,11 +3,11 @@ data_dir:
 output_dir: "saved_models"
 max_length: 512
 max_span_length: 8
-train_batch_size: 8
-eval_batch_size: 8
-negative_sample_ratio: 0.8
+train_batch_size: 4
+eval_batch_size: 4
+negative_sample_ratio: 0.001
 learning_rate: 1e-4
-task_learning_rate: 1e-3
+task_learning_rate: 1e-4
 warmup_proportion: 0.1
 num_epoch: 30
 print_loss_step: 50
@@ -21,7 +21,7 @@ dev_pred_filename: ent_pred_dev.json
 test_pred_filename: ent_pred_test.json
 use_albert: False
 model: bert-base-uncased
-bert_model_dir: None
+bert_model_dir: 
 seed: 1234
 context_window: 64
 clearml_dataset_project_name: datasets/re3d

@@ -8,7 +8,6 @@ from allennlp.nn import util, Activation
 from allennlp.modules import FeedForward
 
 import numpy as np
-
 from transformers import BertTokenizer, BertPreTrainedModel, BertModel
 from transformers import AlbertTokenizer, AlbertPreTrainedModel, AlbertModel
 
@@ -19,7 +18,6 @@ import ipdb
 
 
 class FocalLoss(nn.Module):
-
     def __init__(self, weight=None,
                  gamma=2., reduction='none'):
         nn.Module.__init__(self)
@@ -56,10 +54,10 @@ class BertForEntity(BertPreTrainedModel):
 
         self.ner_classifier = nn.Sequential(
             FeedForward(input_dim=config.hidden_size*2+width_embedding_dim,
-                        num_layers=2,
+                        num_layers=3,
                         hidden_dims=head_hidden_dim,
                         activations=nn.ReLU(),
-                        dropout=0.2),
+                        dropout=0.5),
             nn.Linear(head_hidden_dim, num_ner_labels)
         )
 
@@ -117,7 +115,7 @@ class BertForEntity(BertPreTrainedModel):
 
         if spans_ner_label is not None:
 
-            loss_fct = FocalLoss(gamma=2., reduction='sum')
+            loss_fct = FocalLoss(gamma=3., reduction='sum')
             #loss_fct = CrossEntropyLoss(reduction='sum')
 
             if self.loss_weights != None:
@@ -281,7 +279,7 @@ class EntityModel():
             #               for span in spans if span[1] < max_length]
 
             # We set max index to be max length - 1 (sep token)
-            threshold = self.args.max_length-1
+            threshold = len(bert_tokens)-1
             bert_spans = [[span[0]+1, span[1]+1, span[2]]
                           for span in spans if span[1]+1 < threshold]
 
@@ -424,20 +422,24 @@ class EntityModel():
             pred_prob = []
             hidden = []
 
-            for i, sample in enumerate(samples_list):
+            for sample_idx, sample in enumerate(samples_list):
                 ner = []
                 prob = []
                 lh = []
 
-                threshold = self.args.max_length-1
-                sample['spans'] = [span for span in sample['spans']
-                                   if span[1]+1 < threshold]
+                threshold = tokens_tensor.size()[-1]-1
 
-                for j in range(len(sample['spans'])):
-                    ner.append(predicted_label[i][j])
+                # [span for span in sample['spans'] if span[1]+1 < threshold]
+                filtered_spans = sample['spans'][:spans_ner_label_tensor.size(
+                )[-1]]
+
+                for span_idx in range(len(filtered_spans)):
+                    if span_idx >= len(predicted_label[sample_idx]):
+                        ipdb.set_trace()
+                    ner.append(predicted_label[sample_idx][span_idx])
                     # prob.append(F.softmax(ner_logits[i][j], dim=-1).cpu().numpy())
-                    prob.append(ner_logits[i][j].cpu().numpy())
-                    lh.append(last_hidden[i][j])
+                    prob.append(ner_logits[sample_idx][span_idx].cpu().numpy())
+                    lh.append(last_hidden[sample_idx][span_idx])
                 predicted.append(ner)
                 pred_prob.append(prob)
                 hidden.append(lh)

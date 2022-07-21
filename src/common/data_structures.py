@@ -50,7 +50,7 @@ class Dataset:
         gold_docs = [json.loads(line) for line in open(json_file)]
 
         # ONLY FOR RE3D DATASET
-        gold_docs = [{"doc_key": doc["doc_key"], "sentences": [doc["sentences"]], "ner": [
+        gold_docs = [{"doc_key": doc["doc_key"], "sentences": [doc["tokens"]], "ner": [
             doc["ner"]], "relations":[doc["relations"]]} for doc in gold_docs]
 
         if pred_file is None:
