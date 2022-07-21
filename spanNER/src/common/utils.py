@@ -1,10 +1,15 @@
 import jsonlines
-from collections import OrderedDict
+import collections
 import re
 import json
 import os
 import ipdb
 from typing import List, Dict, Any, Tuple
+from transformers import AutoTokenizer
+from torch.utils.data import Dataset
+import torch
+from clearml import Dataset as ClearML_Dataset
+from data.data import EntityDataset
 
 
 def to_jsonl(filename: str, file_obj):
@@ -101,3 +106,35 @@ def compute_f1(a_gold, a_pred):
     return f1
 
 
+def calculate_loss_weights(ner_label: torch.Tensor, num_ner_labels: int) -> torch.Tensor:
+    weighted_ratio = torch.nn.init.constant_(torch.empty(num_ner_labels), 0.9)
+    unique_class_distribution = torch.unique(
+        ner_label, return_counts=True)
+    for idx, count in zip(unique_class_distribution[0], unique_class_distribution[1]):
+        ratio = (count/ner_label.size()[-1])
+        weighted_ratio[idx] = 1-ratio
+    return weighted_ratio
+
+
+def get_dataset(split_name: str, cfg: Any) -> Tuple[Dataset, List, List]:
+    """Get training and validation dataloaders"""
+    clearml_data_object = ClearML_Dataset.get(
+        dataset_name=cfg.clearml_dataset_name,
+        dataset_project=cfg.clearml_dataset_project_name,
+        dataset_tags=list(cfg.clearml_dataset_tags),
+        # only_published=True,
+    )
+    dataset_path = clearml_data_object.get_local_copy()
+    tokenizer = AutoTokenizer.from_pretrained(
+        cfg.model)
+    entity_labels = ["NonEntity"]+json.load(
+        open(dataset_path+"/entity_classes.json"))['re3d']
+    relation_labels = ["NonRelation"]+json.load(
+        open(dataset_path+"/relation_classes.json"))['re3d']
+    dataset = EntityDataset(
+        cfg, dataset_path+f"/{split_name}.jsonl", tokenizer, entity_labels=entity_labels)
+
+    loss_weights = calculate_loss_weights(
+        torch.tensor(dataset.global_labels), num_ner_labels=len(entity_labels))
+
+    return dataset, entity_labels, relation_labels, loss_weights

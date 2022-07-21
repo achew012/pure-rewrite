@@ -1,26 +1,21 @@
 task: re3d
 data_dir: 
 output_dir: "saved_models"
-max_length: 512
+max_length: 1024
 max_span_length: 8
-train_batch_size: 4
-eval_batch_size: 4
-negative_sample_ratio: 0.001
+span_hidden_size: 150
+train_batch_size: 8
+eval_batch_size: 8
+negative_sample_ratio: 0.005
 learning_rate: 1e-4
-task_learning_rate: 1e-4
 warmup_proportion: 0.1
-num_epoch: 30
-print_loss_step: 50
-eval_per_epoch: 1
-bertadam: True
+num_epoch: 10
+eval_per_epoch: 5
 debug: False
 do_train: True
 do_eval: True
 train_shuffle: True
-dev_pred_filename: ent_pred_dev.json
-test_pred_filename: ent_pred_test.json
-use_albert: False
-model: bert-base-uncased
+model: allenai/longformer-base-4096
 bert_model_dir: 
 seed: 1234
 context_window: 64
