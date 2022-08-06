@@ -62,11 +62,16 @@ class EntityDataset(Dataset):
         self.consolidated_dataset, self.global_labels = self._read(json_file)
 
     def _read(self, json_file: str) -> Tuple[List[Dict], List]:
-        if self.cfg.debug:
-            gold_docs = [json.loads(line) for idx, line in enumerate(
-                open(json_file)) if idx < 50]
-        else:
-            gold_docs = [json.loads(line) for line in open(json_file)]
+        gold_docs = [json.loads(line) for line in open(json_file)]
+        if self.cfg.task == 'scierc':
+            gold_docs = [{
+                **doc,
+                'tokens': [[token for sent in doc['sentences'] for token in sent]],
+                'ner': [ent for sent in doc['ner'] for ent in sent],
+                'relations': [rel for sent in doc['relations'] for rel in sent if len(rel) > 0],
+            }
+                for doc in gold_docs]
+
         encoded_gold_docs = self.encode(gold_docs)
         encoded_gold_docs_w_span_labels, global_labels = self.get_spans(
             encoded_gold_docs)
@@ -94,10 +99,9 @@ class EntityDataset(Dataset):
                     class_idx = span_classes[class_pointer]
                     filtered_spans.append(span)
                     labels.append(class_idx)
-                else:
-                    if random.random() < self.cfg.negative_sample_ratio:
-                        filtered_spans.append(span)
-                        labels.append(0)
+                elif random.random() < self.cfg.negative_sample_ratio:
+                    filtered_spans.append(span)
+                    labels.append(0)
 
             global_labels += labels
 
@@ -121,6 +125,17 @@ class EntityDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict:
         item = self.consolidated_dataset[idx]
+        # new_spans = []
+        # new_labels = []
+        # for span, label in zip(item['spans'], item['labels']):
+        #     if label > 0:
+        #         new_spans.append(span)
+        #         new_labels.append(label)
+        #     elif random.random() < self.cfg.negative_sample_ratio*2:
+        #         new_spans.append(span)
+        #         new_labels.append(label)
+        # item['spans'] = new_spans
+        # item['labels'] = new_labels
         return item
 
     def collate_fn(self, batch):

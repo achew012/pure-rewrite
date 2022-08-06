@@ -11,14 +11,14 @@ from omegaconf import OmegaConf
 import hydra
 import ipdb
 import json
-from models.model import spanNER
+from models.model_sent import spanNER
 from common.utils import get_dataset
 from clearml import Task
 
 
-# Task.force_requirements_env_freeze(
-#     force=True, requirements_file="requirements.txt")
-# Task.add_requirements("git+https://github.com/huggingface/datasets.git")
+Task.force_requirements_env_freeze(
+    force=True, requirements_file="requirements.txt")
+Task.add_requirements("git+https://github.com/huggingface/datasets.git")
 # Task.add_requirements("hydra-core")
 # Task.add_requirements("pytorch-lightning")
 # Task.add_requirements("jsonlines")
@@ -53,16 +53,17 @@ def get_dataloader(split_name: str, cfg) -> Tuple[DataLoader, List, List]:
 
     if split_name == "train":
         return DataLoader(
-            data_instance, batch_size=cfg.train_batch_size, collate_fn=data_instance.collate_fn), entity_labels, relation_labels, loss_weights
+            data_instance, batch_size=cfg.train_batch_size, shuffle=True, collate_fn=data_instance.collate_fn), entity_labels, relation_labels, loss_weights
     else:
         return DataLoader(
-            data_instance, batch_size=cfg.eval_batch_size, collate_fn=data_instance.collate_fn), entity_labels, relation_labels
+            data_instance, batch_size=cfg.eval_batch_size, shuffle=False, collate_fn=data_instance.collate_fn), entity_labels, relation_labels
 
 
 def train(cfg) -> Any:
     train_loader, entity_labels, relation_labels, entity_loss_weights = get_dataloader(
         "train", cfg)
     val_loader, _, _ = get_dataloader("dev", cfg)
+    print(f"Loss weights: {entity_loss_weights}")
     model = spanNER(cfg, num_ner_labels=len(entity_labels),
                     entity_loss_weights=entity_loss_weights)
 
@@ -71,18 +72,18 @@ def train(cfg) -> Any:
     if cfg.checkpointing:
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
             dirpath="./",
-            filename="best_entity_lm",
-            monitor="val_loss",
-            mode="min",
+            filename="best_ner",
+            monitor="val_f1",
+            mode="max",
             save_top_k=1,
             save_weights_only=True,
-            period=10,
+            every_n_epochs=5,
         )
         callbacks.append(checkpoint_callback)
 
     if cfg.early_stopping:
         early_stop_callback = EarlyStopping(
-            monitor="val_loss", patience=8, verbose=False, mode="min")
+            monitor="val_f1", patience=5, verbose=True, mode="max")
         callbacks.append(early_stop_callback)
 
     trainer = pl.Trainer(
@@ -122,6 +123,7 @@ def hydra_main(cfg) -> float:
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     task.connect(cfg_dict)
     cfg = get_clearml_params(task)
+
     print("Detected config file, initiating task... {}".format(cfg))
 
     if cfg.remote:
@@ -132,7 +134,21 @@ def hydra_main(cfg) -> float:
         model = train(cfg)
 
     if cfg.do_eval and model:
-        preds = evaluate(cfg, model, task)
+        if cfg.trained_model_path:
+            checkpoint_path = cfg.trained_model_path
+        elif len(task.models['output']) > 0:
+            checkpoint_path = task.models['output'][0].get_weights()
+        else:
+            print(f"trained outputs: {task.models['output']}")
+            checkpoint_path = None
+
+        if checkpoint_path:
+            model = model.load_from_checkpoint(
+                checkpoint_path, args=cfg, num_ner_labels=7)
+            evaluate(cfg, model)
+            task.upload_artifact('predictions', './predictions.jsonl')
+        else:
+            print("No checkpoint path found. Skipping evaluation")
 
 
 if __name__ == "__main__":

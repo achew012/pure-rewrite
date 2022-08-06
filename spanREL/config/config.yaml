@@ -7,7 +7,7 @@ span_hidden_size: 150
 train_batch_size: 8
 eval_batch_size: 8
 negative_sample_ratio: 0.001
-use_predicted_entities: False
+use_predicted_entities: True
 learning_rate: 1e-4
 warmup_proportion: 0.1
 num_epoch: 10

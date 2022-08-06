@@ -34,7 +34,7 @@ class spanNER(pl.LightningModule):
             self.args.model, config=self.config)
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.config.hidden_size*3 +
+            nn.Linear(self.config.hidden_size*2 +
                       self.args.span_hidden_size, self.config.hidden_size),
             # nn.ReLU(),
             # nn.Dropout(p=0.2),
@@ -70,42 +70,40 @@ class spanNER(pl.LightningModule):
 
         return global_attention_mask
 
-    def _get_span_embeddings(self, outputs, spans, span_mask):
-        # ignore the CLS token in the outputs and offset
-        unit_offset = self.args.max_length - 1
-        cls_embeddings = outputs[0][:, :1].squeeze()[
-            span_mask].unsqueeze(0)
-        sequence_output = outputs[0][:, 1:]
+    def batched_index_select(self, input, dim, index):
+        for ii in range(1, len(input.shape)):
+            if ii != dim:
+                index = index.unsqueeze(ii)
+        expanse = list(input.shape)
+        expanse[0] = -1
+        expanse[dim] = -1
+        index = index.expand(expanse)
+        return torch.gather(input, dim, index)
 
-        # flatten the output to single batch
-        flattened_batch = sequence_output.reshape(
-            -1, self.config.hidden_size)
+    def _get_span_embeddings(self, input_ids: torch.Tensor, spans: torch.Tensor, attention_mask: torch.Tensor):
+        outputs = self.model(
+            input_ids=input_ids, attention_mask=attention_mask)
 
-        flattened_spans = torch.tensor([(span[0]+idx*unit_offset, span[1]+idx*unit_offset, span[2])
-                                        for idx, sample in enumerate(spans) for span in sample], device=self.device)
+        sequence_output, pooled_output = outputs.last_hidden_state, outputs.pooler_output
+        # sequence_output = self.hidden_dropout(sequence_output)
 
-        span_starts = flattened_spans[:, 0]
-        span_ends = flattened_spans[:, 1]
-        span_widths = flattened_spans[:, 2].unsqueeze(0)
+        """
+        spans: [batch_size, num_spans, 3]; 0: left_ned, 1: right_end, 2: width
+        spans_mask: (batch_size, num_spans, )
+        """
+        spans_start = spans[:, :, 0].view(spans.size(0), -1)
+        spans_start_embedding = self.batched_index_select(
+            sequence_output, 1, spans_start)
+        spans_end = spans[:, :, 1].view(spans.size(0), -1)
+        spans_end_embedding = self.batched_index_select(
+            sequence_output, 1, spans_end)
 
-        # Get start embeddings
-        start_span_embeddings = torch.index_select(
-            flattened_batch, 0, span_starts)
-
-        # Get end embeddings
-        end_span_embeddings = torch.index_select(
-            flattened_batch, 0, span_ends)
-
-        # Get width embeddings
-        span_width_embeddings = self.span_width_embeddings(span_widths)
+        spans_width = spans[:, :, 2].view(spans.size(0), -1)
+        spans_width_embedding = self.span_width_embeddings(spans_width)
 
         # Concatenate embeddings of left/right points and the width embedding
         spans_embedding = torch.cat(
-            (start_span_embeddings.unsqueeze(0), end_span_embeddings.unsqueeze(0), span_width_embeddings, cls_embeddings), dim=-1)
-
-        # spans_embedding = torch.cat(
-        #     (start_span_embeddings.unsqueeze(0), end_span_embeddings.unsqueeze(0), span_width_embeddings), dim=-1)
-
+            (spans_start_embedding, spans_end_embedding, spans_width_embedding), dim=-1)
         """
         spans_embedding: (batch_size, num_spans, hidden_size*2+embedding_dim)
         """
@@ -113,36 +111,40 @@ class spanNER(pl.LightningModule):
 
     def forward(self, **batch):
         # in lightning, forward defines the prediction/inference actions
-        span_mask = batch.pop("span_mask", None)
-        spans = batch.pop("spans", None)
-        labels = batch.pop("labels", None)
+        input_ids, attention_mask, spans, spans_mask, = batch['tokens_tensor'], batch[
+            'attention_mask_tensor'], batch['spans_tensor'], batch['spans_mask_tensor']
+        spans_ner_label = batch.pop('spans_ner_label_tensor', None)
 
-        outputs = self.model(
-            **batch,
-            output_hidden_states=True,
-            # global_attention_mask=self._set_global_attention_mask(batch["input_ids"])
-        )
+        spans_embedding = self._get_span_embeddings(
+            input_ids, spans, attention_mask=attention_mask)
+        logits = self.classifier(spans_embedding)
 
-        span_embeddings = self._get_span_embeddings(outputs, spans, span_mask)
-        logits = self.classifier(span_embeddings).squeeze(0)
+        if spans_ner_label is not None:
+            loss_fct = FocalLoss(gamma=10., reduction='sum')
+            # loss_fct = nn.CrossEntropyLoss(reduction='sum')
+            if attention_mask is not None:
+                active_loss = spans_mask.view(-1) == 1
+                active_logits = logits.view(-1, logits.shape[-1])
+                # active_labels = torch.where(
+                #     active_loss, spans_ner_label.view(-1), torch.tensor(
+                #         loss_fct.ignore_index).type_as(spans_ner_label)
+                # )
+                active_labels = torch.where(
+                    active_loss, spans_ner_label.view(-1), torch.tensor(
+                        -100).type_as(spans_ner_label)
+                )
 
-        if labels is not None:
-            if self.entity_loss_weights is not None:
-                loss_fct = FocalLoss(
-                    weight=self.entity_loss_weights.to(self.device), gamma=10., reduction='sum')
-                #loss_fct = torch.nn.CrossEntropyLoss(weight=self.entity_loss_weights, reduction='sum')
+                loss = loss_fct(active_logits, active_labels)
             else:
-                loss_fct = torch.nn.CrossEntropyLoss(reduction='sum')
-
-            span_clf_loss = loss_fct(logits, labels)
-            return (span_clf_loss, logits)
+                loss = loss_fct(
+                    logits.view(-1, logits.shape[-1]), spans_ner_label.view(-1))
+            return loss, logits, spans_embedding
         else:
-            return (logits)
+            return logits, spans_embedding, spans_embedding
 
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop. It is independent of forward
-        doc_keys = batch.pop("doc_keys", None)
-        loss, _ = self(**batch)
+        loss, _, _ = self(**batch)
         # logits = torch.argmax(self.softmax(logits), dim=-1)
         return {"loss": loss}
 
@@ -157,25 +159,23 @@ class spanNER(pl.LightningModule):
         self.log("train_loss", logs["train_loss"])
 
     def validation_step(self, batch, batch_idx):
-        # input_ids, attention_mask, labels = batch
-        doc_keys = batch.pop("doc_keys", None)
-        loss, logits = self(**batch)
+        loss, logits, _ = self(**batch)
 
         if self.task:
             self.task.logger.report_scalar(
                 title='val_loss', series='val', value=loss, iteration=batch_idx)
         preds = torch.argmax(logits, dim=-1)
-        return {"val_loss": loss, "preds": preds, "labels": batch["labels"]}
+        return {"val_loss": loss, "preds": preds, "labels": batch["spans_ner_label_tensor"]}
 
     def validation_epoch_end(self, outputs):
         val_loss_mean = torch.stack(
             [x["val_loss"] for x in outputs]).mean()
 
-        val_preds = torch.cat([x["preds"] for x in outputs],
-                              dim=0).view(-1).cpu().detach().tolist()
+        val_preds = torch.cat([x["preds"].view(-1) for x in outputs],
+                              dim=0).cpu().detach().tolist()
 
-        val_labels = torch.cat([x["labels"] for x in outputs],
-                               dim=0).view(-1).cpu().detach().tolist()
+        val_labels = torch.cat([x["labels"].view(-1) for x in outputs],
+                               dim=0).cpu().detach().tolist()
 
         logs = {
             "val_loss": val_loss_mean,
