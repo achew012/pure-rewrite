@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 import hydra
 import ipdb
 import json
-from models.model_sent import spanNER
+from models.model import spanNER
 from common.utils import get_dataset
 from clearml import Task
 
@@ -63,7 +63,8 @@ def train(cfg) -> Any:
     train_loader, entity_labels, relation_labels, entity_loss_weights = get_dataloader(
         "train", cfg)
     val_loader, _, _ = get_dataloader("dev", cfg)
-    print(f"Loss weights: {entity_loss_weights}")
+    entity_loss_weights = None
+    # print(f"Loss weights: {entity_loss_weights}")
     model = spanNER(cfg, num_ner_labels=len(entity_labels),
                     entity_loss_weights=entity_loss_weights)
 
@@ -77,17 +78,17 @@ def train(cfg) -> Any:
             mode="max",
             save_top_k=1,
             save_weights_only=True,
-            every_n_epochs=5,
+            every_n_epochs=10,
         )
         callbacks.append(checkpoint_callback)
 
     if cfg.early_stopping:
         early_stop_callback = EarlyStopping(
-            monitor="val_f1", patience=5, verbose=True, mode="max")
+            monitor="val_loss", patience=12, verbose=True, mode="min")
         callbacks.append(early_stop_callback)
 
     trainer = pl.Trainer(
-        gpus=cfg.gpu, max_epochs=cfg.num_epoch, callbacks=callbacks, check_val_every_n_epoch=cfg.eval_per_epoch)
+        gpus=cfg.gpu, max_epochs=cfg.num_epoch, callbacks=callbacks, check_val_every_n_epoch=cfg.eval_per_epoch, enable_checkpointing=cfg.checkpointing)
     trainer.fit(model, train_loader, val_loader)
 
     return model
@@ -143,8 +144,15 @@ def hydra_main(cfg) -> float:
             checkpoint_path = None
 
         if checkpoint_path:
+            if cfg.task == "scirex":
+                num_ner_labels = 5
+            elif cfg.task == "scierc":
+                num_ner_labels = 7
+            elif cfg.task == "re3d":
+                num_ner_labels = 15
+
             model = model.load_from_checkpoint(
-                checkpoint_path, args=cfg, num_ner_labels=7)
+                checkpoint_path, args=cfg, num_ner_labels=num_ner_labels)
             evaluate(cfg, model)
             task.upload_artifact('predictions', './predictions.jsonl')
         else:

@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Tuple
 # from transformers import LongformerForMaskedLM, LongformerModel, LongformerTokenizer, LongformerConfig, AdamW, get_linear_schedule_with_warmup
-from transformers import AutoConfig, AutoTokenizer, AutoModel, AdamW, get_linear_schedule_with_warmup
+from transformers import AutoConfig, AutoTokenizer, AutoModel, get_linear_schedule_with_warmup
 # from transformers.models.longformer.modeling_longformer import LongformerLMHead, _compute_global_attention_mask
 import pytorch_lightning as pl
 import torch.nn as nn
@@ -36,11 +36,8 @@ class spanNER(pl.LightningModule):
         self.classifier = nn.Sequential(
             nn.Linear(self.config.hidden_size*3 +
                       self.args.span_hidden_size, self.config.hidden_size),
-            # nn.ReLU(),
-            # nn.Dropout(p=0.2),
-            # nn.Linear(self.config.hidden_size, self.config.hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=0.5),
+            nn.Dropout(p=0.2),
             nn.Linear(self.config.hidden_size, self.num_ner_labels)
         )
 
@@ -71,10 +68,12 @@ class spanNER(pl.LightningModule):
         return global_attention_mask
 
     def _get_span_embeddings(self, outputs, spans, span_mask):
+
         # ignore the CLS token in the outputs and offset
         unit_offset = self.args.max_length - 1
         cls_embeddings = outputs[0][:, :1].squeeze()[
             span_mask].unsqueeze(0)
+
         sequence_output = outputs[0][:, 1:]
 
         # flatten the output to single batch
@@ -111,6 +110,15 @@ class spanNER(pl.LightningModule):
         """
         return spans_embedding
 
+    def calculate_loss_weights(self, labels: torch.Tensor, num_labels: int) -> torch.Tensor:
+        weighted_ratio = torch.nn.init.constant_(torch.empty(num_labels), 0.9)
+        unique_class_distribution = torch.unique(
+            labels, return_counts=True)
+        for idx, count in zip(unique_class_distribution[0], unique_class_distribution[1]):
+            ratio = (count/labels.size()[-1])
+            weighted_ratio[idx] = 1-ratio
+        return weighted_ratio
+
     def forward(self, **batch):
         # in lightning, forward defines the prediction/inference actions
         span_mask = batch.pop("span_mask", None)
@@ -127,12 +135,12 @@ class spanNER(pl.LightningModule):
         logits = self.classifier(span_embeddings).squeeze(0)
 
         if labels is not None:
-            if self.entity_loss_weights is not None:
-                loss_fct = FocalLoss(
-                    weight=self.entity_loss_weights.to(self.device), gamma=10., reduction='sum')
-                #loss_fct = torch.nn.CrossEntropyLoss(weight=self.entity_loss_weights, reduction='sum')
-            else:
-                loss_fct = torch.nn.CrossEntropyLoss(reduction='sum')
+            entity_loss_weights = self.calculate_loss_weights(
+                labels, self.num_ner_labels)
+            loss_fct = FocalLoss(
+                weight=entity_loss_weights.to(self.device), gamma=3., reduction='sum')
+            # loss_fct = torch.nn.CrossEntropyLoss(
+            #     weight=entity_loss_weights.to(self.device), reduction='sum')
 
             span_clf_loss = loss_fct(logits, labels)
             return (span_clf_loss, logits)
@@ -250,18 +258,32 @@ class spanNER(pl.LightningModule):
         #         parameters.requires_grad = True
 
         weight_decay = 1e-4
-        optimizer = torch.optim.AdamW(
-            self.parameters(), lr=self.args.learning_rate, weight_decay=weight_decay)
+
+        param_optimizer = list(self.named_parameters())
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_optimizer
+                        if 'bert' in n]},
+            {'params': [p for n, p in param_optimizer
+                        if 'bert' not in n], 'lr': self.args.learning_rate*10}]
+
+        # optimizer = torch.optim.AdamW(optimizer_grouped_parameters,
+        #                               lr=self.args.learning_rate, weight_decay=weight_decay)
 
         # scheduler = torch.optim.lr_scheduler.StepLR(
-        #     optimizer, step_size=30, gamma=0.1, verbose=True)
-        # return (
-        #     {
-        #         "optimizer": optimizer,
-        #         "lr_scheduler": {
-        #             "scheduler": scheduler,
-        #             "monitor": "val_loss",
-        #         },
-        #     },
-        # )
-        return optimizer
+        #     optimizer, step_size=10, gamma=0.2, verbose=True)
+
+        optimizer = torch.optim.SGD(
+            optimizer_grouped_parameters, lr=self.args.learning_rate, momentum=0.9)
+
+        scheduler = torch.optim.lr_scheduler.CyclicLR(
+            optimizer, base_lr=self.args.learning_rate*0.1, max_lr=self.args.learning_rate*10, verbose=True)
+
+        return (
+            {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "monitor": "val_loss",
+                },
+            },
+        )

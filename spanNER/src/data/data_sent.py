@@ -59,17 +59,17 @@ class EntityDataset(Dataset):
         self.cfg = cfg
         self.tokenizer = tokenizer
         self.entity_labels = entity_labels
-        self.consolidated_dataset = self._read(json_file)
-        self.global_labels = None
+        self.consolidated_dataset, self.global_labels = self._read(json_file)
 
     def _read(self, json_file: str) -> Tuple[List[Dict], List]:
         gold_docs = [json.loads(line) for line in open(json_file)]
         # encoded_gold_docs = self.encode(gold_docs)
-        gold_sent_w_span_labels = self.get_spans(gold_docs)
-        return gold_sent_w_span_labels
+        gold_sent_w_span_labels, global_labels = self.get_spans(gold_docs)
+        return gold_sent_w_span_labels, global_labels
 
     def get_spans(self, docs: List[Dict]) -> Tuple[List[Dict], List]:
         sent_w_span_labels = []
+        global_labels = []
         for doc in docs:
             doc_key = doc['doc_key']
             offset = 0
@@ -101,8 +101,9 @@ class EntityDataset(Dataset):
                     {"doc_key": doc_key, "offset": offset, "sent": sent, "spans": filtered_spans, "labels": labels, "sent_length": len(sent)})
 
                 offset += len(sent)
+                global_labels += labels
 
-        return sent_w_span_labels
+        return sent_w_span_labels, global_labels
 
     def _get_input_tensors(self, tokens, spans, spans_ner_label):
         start2idx = []
@@ -180,11 +181,12 @@ class EntityDataset(Dataset):
 
             # padding for spans
             num_spans = bert_spans_tensor.shape[1]
+
             spans_pad_length = max_spans - num_spans
             spans_mask_tensor = torch.full([1, num_spans], 1, dtype=torch.long)
             if spans_pad_length > 0:
                 pad = torch.full(
-                    [1, spans_pad_length, bert_spans_tensor.shape[2]], 0, dtype=torch.long)
+                    [1, spans_pad_length, bert_spans_tensor.size(2)], 0, dtype=torch.long)
                 bert_spans_tensor = torch.cat((bert_spans_tensor, pad), dim=1)
                 mask_pad = torch.full(
                     [1, spans_pad_length], 0, dtype=torch.long)

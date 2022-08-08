@@ -36,11 +36,11 @@ class spanNER(pl.LightningModule):
         self.classifier = nn.Sequential(
             nn.Linear(self.config.hidden_size*2 +
                       self.args.span_hidden_size, self.config.hidden_size),
-            # nn.ReLU(),
-            # nn.Dropout(p=0.2),
-            # nn.Linear(self.config.hidden_size, self.config.hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=0.5),
+            nn.Dropout(p=0.2),
+            nn.Linear(self.config.hidden_size, self.config.hidden_size),
+            nn.ReLU(),
+            nn.Dropout(p=0.2),
             nn.Linear(self.config.hidden_size, self.num_ner_labels)
         )
 
@@ -120,8 +120,11 @@ class spanNER(pl.LightningModule):
         logits = self.classifier(spans_embedding)
 
         if spans_ner_label is not None:
-            loss_fct = FocalLoss(gamma=10., reduction='sum')
-            # loss_fct = nn.CrossEntropyLoss(reduction='sum')
+            loss_fct = FocalLoss(
+                weight=self.entity_loss_weights.to(self.device), gamma=3., reduction='sum')
+            # loss_fct = nn.CrossEntropyLoss(
+            #     weight=self.entity_loss_weights.to(self.device), reduction='sum')
+
             if attention_mask is not None:
                 active_loss = spans_mask.view(-1) == 1
                 active_logits = logits.view(-1, logits.shape[-1])
@@ -145,6 +148,7 @@ class spanNER(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop. It is independent of forward
         loss, _, _ = self(**batch)
+        loss = loss.sum()
         # logits = torch.argmax(self.softmax(logits), dim=-1)
         return {"loss": loss}
 
@@ -164,7 +168,7 @@ class spanNER(pl.LightningModule):
         if self.task:
             self.task.logger.report_scalar(
                 title='val_loss', series='val', value=loss, iteration=batch_idx)
-        preds = torch.argmax(logits, dim=-1)
+        preds = torch.argmax(logits, dim=2)
         return {"val_loss": loss, "preds": preds, "labels": batch["spans_ner_label_tensor"]}
 
     def validation_epoch_end(self, outputs):
@@ -185,6 +189,8 @@ class spanNER(pl.LightningModule):
             val_labels, val_preds, average='macro')
 
         print(classification_report(val_labels, val_preds))
+        print(
+            f"loss: {val_loss_mean}, precision: {precision}, recall: {recall}, f1: {f1}")
 
         self.log("val_loss", logs["val_loss"])
         self.log("val_precision", precision)
@@ -192,53 +198,67 @@ class spanNER(pl.LightningModule):
         self.log("val_f1", f1)
 
     def test_step(self, batch, batch_idx):
-        doc_keys = batch.pop("doc_keys", None)
-        span_mask = batch["span_mask"]
-        loss, logits = self(**batch)
-        preds = torch.argmax(logits, dim=-1)
-        spans = batch["spans"]
+        loss, logits, _ = self(**batch)
+        _, predicted_labels = torch.argmax(logits, dim=2)
 
-        flattened_spans = [span for sample in spans for span in sample]
-        spans_w_preds = torch.tensor([(span[0], span[1], pred.cpu().detach().item())
-                                      for span, pred in zip(flattened_spans, preds)], device=self.device)
+        predicted_labels = predicted_labels.cpu().numpy()
 
-        reconstructed_preds = [spans_w_preds[span_mask.eq(
-            sample_idx)] for sample_idx in span_mask.unique()]
-
-        return {"test_loss": loss, "preds": preds, "labels": batch["labels"], "reconstructed_preds": reconstructed_preds}
+        return {"test_loss": loss, "preds": predicted_labels}
 
     def test_epoch_end(self, outputs):
+        test_loss_mean = torch.stack(
+            [x["test_loss"] for x in outputs]).mean()
 
-        test_instance, entity_labels, _, _ = get_dataset(
-            split_name='test', cfg=self.args)
-
-        test_loss_mean = torch.stack([x["test_loss"] for x in outputs]).mean()
-
-        test_preds = torch.cat([x["preds"] for x in outputs],
+        test_preds = torch.cat([x["preds"].view(-1) for x in outputs],
                                dim=0).cpu().detach().tolist()
 
-        test_labels = torch.cat([x["labels"] for x in outputs],
-                                dim=0).view(-1).cpu().detach().tolist()
+        test_labels = torch.cat([x["labels"].view(-1) for x in outputs],
+                                dim=0).cpu().detach().tolist()
 
-        reconstructed_preds = [[(span[0], span[1], entity_labels[span[2]]) for span in sample.cpu().detach().tolist() if span[2] != 0]
-                               for x in outputs for sample in x["reconstructed_preds"]]
+        logs = {
+            "test_loss": test_loss_mean,
+        }
+
         precision, recall, f1, support = precision_recall_fscore_support(
             test_labels, test_preds, average='macro')
 
         print(classification_report(test_labels, test_preds))
 
-        preds = [{**{key: sample[key] for key in sample if key in ['doc_key', 'sentences', 'ner', 'relations', 'predicted_ner']}, "predicted_ner": pred}
-                 for pred, sample in zip(reconstructed_preds, test_instance.consolidated_dataset)]
-
-        to_jsonl("predictions.jsonl", preds)
-
-        if self.task:
-            self.task.upload_artifact("predictions", "predictions.jsonl")
-
-        self.log("test_loss", test_loss_mean)
+        self.log("test_loss", logs["test_loss"])
         self.log("test_precision", precision)
         self.log("test_recall", recall)
         self.log("test_f1", f1)
+
+        # test_instance, entity_labels, _, _ = get_dataset(
+        #     split_name='test', cfg=self.args)
+
+        # test_loss_mean = torch.stack([x["test_loss"] for x in outputs]).mean()
+
+        # test_preds = torch.cat([x["preds"] for x in outputs],
+        #                        dim=0).cpu().detach().tolist()
+
+        # test_labels = torch.cat([x["labels"] for x in outputs],
+        #                         dim=0).view(-1).cpu().detach().tolist()
+
+        # reconstructed_preds = [[(span[0], span[1], entity_labels[span[2]]) for span in sample.cpu().detach().tolist() if span[2] != 0]
+        #                        for x in outputs for sample in x["reconstructed_preds"]]
+        # precision, recall, f1, support = precision_recall_fscore_support(
+        #     test_labels, test_preds, average='macro')
+
+        # print(classification_report(test_labels, test_preds))
+
+        # preds = [{**{key: sample[key] for key in sample if key in ['doc_key', 'sentences', 'ner', 'relations', 'predicted_ner']}, "predicted_ner": pred}
+        #          for pred, sample in zip(reconstructed_preds, test_instance.consolidated_dataset)]
+
+        # to_jsonl("predictions.jsonl", preds)
+
+        # if self.task:
+        #     self.task.upload_artifact("predictions", "predictions.jsonl")
+
+        # self.log("test_loss", test_loss_mean)
+        # self.log("test_precision", precision)
+        # self.log("test_recall", recall)
+        # self.log("test_f1", f1)
 
     # Freeze weights?
     def configure_optimizers(self):
@@ -249,9 +269,18 @@ class spanNER(pl.LightningModule):
         #     else:
         #         parameters.requires_grad = True
 
-        weight_decay = 1e-4
-        optimizer = torch.optim.AdamW(
-            self.parameters(), lr=self.args.learning_rate, weight_decay=weight_decay)
+        # weight_decay = 1e-4
+        # optimizer = torch.optim.AdamW(
+        #     self.parameters(), lr=self.args.learning_rate, weight_decay=weight_decay)
+
+        param_optimizer = list(self.named_parameters())
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_optimizer
+                        if 'bert' in n]},
+            {'params': [p for n, p in param_optimizer
+                        if 'bert' not in n], 'lr': self.args.learning_rate*10}]
+        optimizer = AdamW(optimizer_grouped_parameters,
+                          lr=self.args.learning_rate)
 
         # scheduler = torch.optim.lr_scheduler.StepLR(
         #     optimizer, step_size=30, gamma=0.1, verbose=True)
