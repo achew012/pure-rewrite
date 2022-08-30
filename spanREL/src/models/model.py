@@ -35,6 +35,8 @@ class spanREL(pl.LightningModule):
         relation_classifier_input_dim = (self.config.hidden_size*2 +
                                          self.args.span_hidden_size)*2+self.config.hidden_size
 
+        print("relation_classifier_input_dim: ", relation_classifier_input_dim)
+
         self.classifier = nn.Sequential(
             nn.Linear(relation_classifier_input_dim, self.config.hidden_size),
             nn.ReLU(),
@@ -129,7 +131,7 @@ class spanREL(pl.LightningModule):
 
         span_pair_embedding = torch.cat(
             (subj_embeddings, cls_embeddings, obj_embeddings), dim=-1)
-
+        
         logits = self.classifier(span_pair_embedding).squeeze(0)
 
         if labels is not None:
