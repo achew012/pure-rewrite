@@ -98,7 +98,7 @@ class RelationDataset(Dataset):
                     candidate_pair = entities[i][:2]+entities[j][:2]
                     candidate_pair_w_width = candidate_pair[:2]+[
                         candidate_pair[1]-candidate_pair[0]+1]+candidate_pair[2:]+[
-                        candidate_pair[3]-candidate_pair[2]+1]
+                        candidate_pair[3]-candidate_pair[2]+1]                    
 
                     if candidate_pair in positive_pairs and candidate_pair_w_width[2] < self.cfg.max_span_length and candidate_pair_w_width[5] < self.cfg.max_span_length:
                         # add candidate
@@ -106,7 +106,7 @@ class RelationDataset(Dataset):
                         # add label
                         label_idx = positive_pairs.index(candidate_pair)
                         labels.append(positive_labels[label_idx])
-                    elif random.random() < self.cfg.negative_sample_ratio:
+                    elif random.random() < self.cfg.negative_sample_ratio and candidate_pair_w_width[2] < self.cfg.max_span_length and candidate_pair_w_width[5] < self.cfg.max_span_length:
                         # add negative candidate
                         entity_pairs.append(candidate_pair_w_width)
                         # add negative label
@@ -123,6 +123,7 @@ class RelationDataset(Dataset):
         encoded_docs = []
         for doc in docs:
             text = self.tokenizer.convert_tokens_to_string(doc["tokens"][0])
+            # print("text: ", type(text))
             encodings = self.tokenizer(
                 text, padding="max_length", truncation=True, max_length=self.cfg.max_length, return_tensors="pt")
             encoded_docs.append(

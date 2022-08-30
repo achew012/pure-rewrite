@@ -2,15 +2,15 @@ task: re3d
 data_dir: 
 output_dir: "saved_models"
 max_length: 1024
-max_span_length: 20
-span_hidden_size: 150
+max_span_length: 25
+span_hidden_size: 300
 train_batch_size: 8
 eval_batch_size: 8
-negative_sample_ratio: 0.001
-use_predicted_entities: True
-learning_rate: 1e-4
+negative_sample_ratio: 0.001 #0.01
+use_predicted_entities: False
+learning_rate: 5e-5
 warmup_proportion: 0.1
-num_epoch: 10
+num_epoch: 100
 eval_per_epoch: 3
 debug: False
 do_train: True
@@ -26,7 +26,7 @@ clearml_dataset_tags: []
 task_tags: []
 gpu: 1
 remote: False
-early_stopping: False
-checkpointing: False
+early_stopping: True
+checkpointing: True
 trained_model_path: 
 queue: compute

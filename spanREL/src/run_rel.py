@@ -16,12 +16,13 @@ from common.utils import get_dataset
 from clearml import Task
 
 
-# Task.force_requirements_env_freeze(
-#     force=True, requirements_file="requirements.txt")
-# Task.add_requirements("git+https://github.com/huggingface/datasets.git")
+Task.force_requirements_env_freeze(
+    force=True, requirements_file="requirements.txt")
+Task.add_requirements("git+https://github.com/huggingface/datasets.git")
 # Task.add_requirements("hydra-core")
 # Task.add_requirements("pytorch-lightning")
 # Task.add_requirements("jsonlines")
+# Task.add_requirements("omegaconf")
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -104,29 +105,29 @@ def hydra_main(cfg) -> float:
     tags = list(cfg.task_tags) + \
         ["debug"] if cfg.debug else list(cfg.task_tags)
 
-    # if cfg.do_train:
-    #     task = Task.init(
-    #         project_name="ER-extraction",
-    #         task_name="pure-train",
-    #         output_uri="s3://experiment-logging/storage/",
-    #         tags=tags,
-    #     )
-    # else:
-    #     task = Task.init(
-    #         project_name="ER-extraction",
-    #         task_name="pure-predict",
-    #         output_uri="s3://experiment-logging/storage/",
-    #         tags=tags,
-    #     )
+    if cfg.do_train:
+        task = Task.init(
+            project_name="ER-extraction",
+            task_name="spanREL-train",
+            output_uri="s3://experiment-logging/storage/",
+            tags=tags,
+        )
+    else:
+        task = Task.init(
+            project_name="ER-extraction",
+            task_name="pure-predict",
+            output_uri="s3://experiment-logging/storage/",
+            tags=tags,
+        )
 
-    # cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-    # task.connect(cfg_dict)
-    # cfg = get_clearml_params(task)
-    # print("Detected config file, initiating task... {}".format(cfg))
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+    task.connect(cfg_dict)
+    cfg = get_clearml_params(task)
+    print("Detected config file, initiating task... {}".format(cfg))
 
-    # if cfg.remote:
-    #     task.set_base_docker("nvidia/cuda:11.4.0-runtime-ubuntu20.04")
-    #     task.execute_remotely(queue_name=cfg.queue, exit_process=True)
+    if cfg.remote:
+        task.set_base_docker("nvidia/cuda:11.4.0-runtime-ubuntu20.04",docker_setup_bash_script=['CUDA_LAUNCH_BLOCKING=1'])
+        task.execute_remotely(queue_name=cfg.queue, exit_process=True)
 
     if cfg.do_train:
         model = train(cfg)
