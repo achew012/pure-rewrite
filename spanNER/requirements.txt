@@ -8,6 +8,6 @@ ipdb
 hydra-core
 jsonlines
 scipy
-clearml
+clearml==1.5.0
 tqdm
 sklearn

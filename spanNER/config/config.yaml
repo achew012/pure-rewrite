@@ -1,4 +1,4 @@
-task: scierc #scirex #scierc #re3d
+task: re3d #scierc #scirex #scierc 
 data_dir: 
 output_dir: "saved_models"
 max_length: 512
@@ -15,14 +15,14 @@ debug: False
 do_train: True
 do_eval: True
 train_shuffle: True
-model: allenai/scibert_scivocab_uncased #allenai/longformer-base-4096
+model: allenai/longformer-base-4096 #allenai/scibert_scivocab_uncased 
 seed: 1234
-clearml_dataset_project_name: datasets/sci-erc #datasets/scirex #datasets/sci-erc #datasets/re3d
-clearml_dataset_name: processed_json #scirex-doc #processed_json #re3d_formatted
+clearml_dataset_project_name: datasets/re3d #datasets/sci-erc #datasets/scirex #datasets/sci-erc 
+clearml_dataset_name: re3d_formatted #processed_json #scirex-doc #processed_json 
 clearml_dataset_tags: []
 task_tags: []
 gpu: 1
-remote: False
+remote: True
 early_stopping: True
 checkpointing: True
 trained_model_path: 
