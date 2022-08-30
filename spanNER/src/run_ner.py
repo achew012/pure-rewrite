@@ -48,8 +48,7 @@ def get_clearml_params(task: Task) -> Dict[str, Any]:
 
 
 def get_dataloader(split_name: str, cfg) -> Tuple[DataLoader, List, List]:
-    data_instance, entity_labels, relation_labels, loss_weights = get_dataset(
-        split_name, cfg)
+    data_instance, entity_labels, relation_labels, loss_weights = get_dataset(split_name, cfg)
 
     if split_name == "train":
         return DataLoader(

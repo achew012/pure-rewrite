@@ -125,8 +125,7 @@ def get_dataset(split_name: str, cfg: Any) -> Tuple[Dataset, List, List]:
         # only_published=True,
     )
     dataset_path = clearml_data_object.get_local_copy()
-    tokenizer = AutoTokenizer.from_pretrained(
-        cfg.model)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
     if cfg.task == "re3d":
         from data.data import EntityDataset
