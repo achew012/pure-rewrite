@@ -1,6 +1,6 @@
 __pycache__
 outputs
 .mypy_cache
-scierc_data
-spanNER/data
+scierc_datagit 
 venv
+spanNER/data
